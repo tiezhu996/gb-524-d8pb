@@ -17,6 +17,11 @@ type ExcludeObservationRequest struct {
 	Reason string `json:"reason" binding:"required,min=6,max=500"`
 }
 
+// RescheduleObservationRequest 改期观测的实际采集时间，改期后批次会重新计算。
+type RescheduleObservationRequest struct {
+	ObservedAt time.Time `json:"observed_at" binding:"required"`
+}
+
 type ObservationValidation struct {
 	ObservationID    uint     `json:"observation_id"`
 	Valid            bool     `json:"valid"`

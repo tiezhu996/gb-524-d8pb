@@ -39,7 +39,9 @@ docker compose down -v --remove-orphans
 - 维护 WGS84 测向站坐标、天线偏置、精度和校准状态；原始方位与偏置校正方位同时保留。
 - 按案例录入频率、带宽、信号强度和质量，批量校验频率匹配与站点状态，排除操作保留原因和审计。
 - 在本地笛卡尔坐标图中显示测向站、方位射线、估计点、不确定区域、逐站残差和离群证据。
+- 定位批次时间一致性门禁：同一案例按最早有效观测起的 30 分钟采集窗口分批，只有同一批次内来自至少两个不同测向站的三条有效观测才能运行定位；跨批次观测保留在案例中但不参与本次估计。排除、补录或改期观测后自动重新分批，定位页显示批次、不满足原因和可用观测。
 - 二站几何交汇和三站以上加权最小二乘使用同一确定性求解器；近平行或近共线几何明确拒绝，不返回伪精确点。
+- 定位结果保存所采用的批次窗口、观测清单与证据快照；基于证据指纹去重，重复或并发运行只生成一份结果，原结果不可覆盖。
 - 当至少有四条有效观测时，可比较标准化残差并生成一次离群候选重算；原估计和候选结果都不可覆盖。
 - 案例执行 `draft -> collecting -> analyzing -> pending_review -> confirmed -> closed`；退回从 `pending_review` 回到 `analyzing`，关闭后只读。
 - JWT、RBAC、乐观锁、事务、内存令牌桶限流、request ID、结构化日志和不可变审计贯穿业务链。
@@ -99,11 +101,13 @@ docker compose down -v --remove-orphans
 | `GET` | `/api/v1/stations/:id/coverage` | 站点观测覆盖 |
 | `GET/POST` | `/api/v1/observations` | 观测列表与录入 |
 | `POST` | `/api/v1/observations/:id/exclude` | 保存原因并排除观测 |
+| `POST` | `/api/v1/observations/:id/reschedule` | 改期观测采集时间，改期后重新分批 |
 | `GET` | `/api/v1/cases/:id/validate-observations` | 批量校验案例观测 |
 | `GET/POST` | `/api/v1/cases` | 案例列表与草稿创建 |
 | `POST` | `/api/v1/cases/:id/transition` | 带 version 的状态迁移 |
+| `GET` | `/api/v1/cases/:id/batches` | 查询 30 分钟批次、门禁原因与可用观测 |
 | `GET` | `/api/v1/localizations` | 查询不可覆盖的定位历史 |
-| `POST` | `/api/v1/localizations/run` | 运行加权定位和离群候选，独立限流 |
+| `POST` | `/api/v1/localizations/run` | 按批次运行加权定位和离群候选，独立限流；重复/并发只产生一份结果 |
 | `GET` | `/api/v1/audits` | 复核员/管理员查询不可变审计 |
 
 成功响应统一为 `{ data, request_id, meta? }`，错误响应为 `{ error: { code, message, details? }, request_id }`。分页使用 `page` 与 `page_size`，时间使用 RFC 3339 UTC。
@@ -132,6 +136,15 @@ docker compose down -v --remove-orphans
 4. 通过 2×2 对称矩阵特征值计算条件数。最小特征值过小或条件数超过 `GEOMETRY_CONDITION_LIMIT` 时返回 `GEOMETRY_DEGENERATE`，不形成定位点。
 5. 残差是观测方位与“测站指向估计点”的最小有符号角差；不确定半径综合站点距离、精度、加权 RMS 残差和几何因子，只表达模型不确定性。
 6. 离群候选仅在原始有效观测不少于 4 条、剔除后仍不少于 3 条、最大标准化残差超过 2.5 且候选残差至少改善 20% 时生成。原估计仍永久保存。
+
+### 定位批次时间一致性门禁
+
+1. 仅未人工排除、所属测向站为 `active`、且频率在案例中心频率 ± 半带宽内的观测才是有效采集证据；其余观测保留在案例中，可在页面查看但不参与分批与估计。
+2. 以最早一条有效观测时间为起点，按连续 30 分钟窗口（`[t0 + k·30m, t0 + (k+1)·30m)`）分批，批次索引按时间从 0 起连续编号，空窗口不占位。
+3. 同一批次必须同时满足「至少 3 条有效观测」和「来自至少 2 个不同测向站」才允许运行定位，否则返回 `BATCH_GATE_FAILED` 并携带 `gate_reasons`（`OBSERVATION_COUNT_BELOW_3`、`STATION_COUNT_BELOW_2`）。
+4. 运行时默认选择最早一个满足门禁的批次，也可在请求体中显式指定 `batch_index`；跨批次观测不进入本次求解输入。
+5. 排除、补录或改期（`POST /observations/:id/reschedule`）观测后，批次以最新有效观测重新计算，前端提供「重新分批」刷新。
+6. 每条结果保存批次索引、窗口起止时间、批次观测 ID 列表与完整输入快照；对证据批次（窗口、观测、方位、权重、离群开关与几何阈值）计算 SHA-256 指纹 `run_signature`。相同指纹的重复运行返回既有结果（HTTP 200，`reused=true`），并发运行借助乐观锁与唯一索引收敛到同一份结果，定位算法、案例复核状态机与角色权限均不改变。
 
 以上是适用于小区域的软件演示模型，不包含电波传播、地形、多径、同步误差或法规判定，不能替代经校准的专业测向流程。
 
@@ -187,6 +200,9 @@ npm --prefix frontend run build
 - 后端未 healthy：执行 `docker compose logs backend`，检查 JWT 长度、数据库密码和 PostgreSQL 健康状态。
 - 定位返回 `FREQUENCY_MISMATCH`：确认每条观测与案例中心频率的偏差不超过该观测带宽的一半。
 - 定位返回 `GEOMETRY_DEGENERATE`：增加不同方位几何的测向站，不能通过放宽显示精度规避退化证据。
+- 定位返回 `BATCH_GATE_FAILED`：在定位页查看批次门禁原因，确保同一 30 分钟窗口内有至少三条有效观测且来自至少两个测向站；时间跨窗的观测可在观测工作台改期后重新分批。
+- 定位返回 `BATCH_INDEX_INVALID`：排除、补录或改期后批次已重新编号，刷新批次面板后再选择。
+- 重复运行返回相同结果与 `reused=true`：该证据批次已有结果，系统按证据指纹复用唯一一份结果而非覆盖；改变批次证据（如改期、排除）后才会产生新结果。
 - 状态迁移返回 `CASE_VERSION_CONFLICT`：其他请求已更新案例，刷新列表后使用新 version 重试。
 - 登录后出现 401：清除当前标签页 `sessionStorage` 后重新登录；令牌不会持久化到其他浏览器会话。
 

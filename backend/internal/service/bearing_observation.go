@@ -81,6 +81,18 @@ func (s *ObservationService) Exclude(ctx context.Context, id uint, request dto.E
 	return s.repo.Exclude(ctx, id, strings.TrimSpace(request.Reason), actor)
 }
 
+// Reschedule 改期观测的实际采集时间；改期后定位批次以最新观测重新分批。
+func (s *ObservationService) Reschedule(ctx context.Context, id uint, request dto.RescheduleObservationRequest, actor repository.Actor) (model.BearingObservation, error) {
+	if !constants.CanObserve(actor.Role) {
+		return model.BearingObservation{}, api.ErrForbidden
+	}
+	observedAt := request.ObservedAt.UTC()
+	if observedAt.After(time.Now().UTC().Add(5 * time.Minute)) {
+		return model.BearingObservation{}, api.NewError(422, "INVALID_OBSERVATION_TIME", "观测时间不能晚于当前时间")
+	}
+	return s.repo.Reschedule(ctx, id, observedAt, actor)
+}
+
 func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto.BatchValidationResponse, error) {
 	caseRecord, err := s.caseRepo.Get(ctx, caseID)
 	if err != nil {

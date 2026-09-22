@@ -9,6 +9,7 @@ interface ObservationState {
   load: (caseId?: number, stationId?: number) => Promise<void>
   createObservation: (input: ObservationInput) => Promise<BearingObservation>
   excludeObservation: (id: number, reason: string) => Promise<void>
+  rescheduleObservation: (id: number, observedAt: string) => Promise<void>
   validateCase: (caseId: number) => Promise<BatchValidation>
 }
 
@@ -32,6 +33,10 @@ export const useObservationStore = create<ObservationState>((set, get) => ({
   },
   excludeObservation: async (id, reason) => {
     const response = await observationApi.exclude(id, reason)
+    set({ observations: get().observations.map((item) => item.id === id ? { ...item, ...response.data } : item) })
+  },
+  rescheduleObservation: async (id, observedAt) => {
+    const response = await observationApi.reschedule(id, observedAt)
     set({ observations: get().observations.map((item) => item.id === id ? { ...item, ...response.data } : item) })
   },
   validateCase: async (caseId) => {

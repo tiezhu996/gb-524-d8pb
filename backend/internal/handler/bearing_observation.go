@@ -87,6 +87,27 @@ func (h *ObservationHandler) Exclude(c *gin.Context) {
 	api.Success(c, http.StatusOK, observation)
 }
 
+func (h *ObservationHandler) Reschedule(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	actor, ok := actorFromContext(c)
+	if !ok {
+		return
+	}
+	var request dto.RescheduleObservationRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	observation, err := h.service.Reschedule(c.Request.Context(), id, request, actor)
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusOK, observation)
+}
+
 func (h *ObservationHandler) ValidateCase(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {

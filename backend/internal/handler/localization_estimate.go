@@ -56,5 +56,24 @@ func (h *EstimateHandler) Run(c *gin.Context) {
 		api.Fail(c, err)
 		return
 	}
-	api.Success(c, http.StatusCreated, result)
+	// 复用已有证据结果时返回 200，新生成结果返回 201。
+	status := http.StatusCreated
+	if result.Reused {
+		status = http.StatusOK
+	}
+	api.Success(c, status, result)
+}
+
+// Batches 返回案例 30 分钟采集窗口分批方案与门禁原因。
+func (h *EstimateHandler) Batches(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	plan, err := h.service.PreviewBatches(c.Request.Context(), id)
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusOK, plan)
 }

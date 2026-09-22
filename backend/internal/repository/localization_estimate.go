@@ -42,6 +42,22 @@ func (r *EstimateRepository) Get(ctx context.Context, id uint) (model.Localizati
 	return estimate, nil
 }
 
+// FindBySignature 返回案例内与证据指纹匹配的主估计；无匹配时返回 nil。
+// 用于重复或并发运行时复用唯一一份结果。
+func (r *EstimateRepository) FindBySignature(ctx context.Context, caseID uint, signature string) (*model.LocalizationEstimate, error) {
+	var estimate model.LocalizationEstimate
+	err := r.db.WithContext(ctx).
+		Where("case_id = ? AND run_signature = ?", caseID, signature).
+		First(&estimate).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find estimate by signature: %w", err)
+	}
+	return &estimate, nil
+}
+
 func (r *EstimateRepository) CreateRun(ctx context.Context, caseID, version uint, primary *model.LocalizationEstimate, candidate *model.LocalizationEstimate, allowOutlier bool, conditionLimit float64, actor Actor) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		claim := tx.Model(&model.InterferenceCase{}).
@@ -73,11 +89,16 @@ func (r *EstimateRepository) CreateRun(ctx context.Context, caseID, version uint
 				}
 				return candidate.ID
 			}(),
-			"residual_deg":         primary.ResidualDeg,
-			"condition_number":     primary.ConditionNumber,
-			"geometry_degenerate":  primary.GeometryDegenerate,
-			"used_observation_ids": primary.UsedObservationIDsJSON,
-			"outlier_ids":          primary.OutlierIDsJSON,
+			"residual_deg":          primary.ResidualDeg,
+			"condition_number":      primary.ConditionNumber,
+			"geometry_degenerate":   primary.GeometryDegenerate,
+			"used_observation_ids":  primary.UsedObservationIDsJSON,
+			"outlier_ids":           primary.OutlierIDsJSON,
+			"batch_index":           primary.BatchIndex,
+			"batch_window_start":    primary.BatchWindowStart,
+			"batch_window_end":      primary.BatchWindowEnd,
+			"batch_observation_ids": primary.BatchObservationIDsJSON,
+			"run_signature":         primary.RunSignature,
 		}
 		audit := NewAudit(actor, "localization_estimate.created", "interference_case", caseID, map[string]any{"version": version}, after)
 		if err := tx.Create(&audit).Error; err != nil {

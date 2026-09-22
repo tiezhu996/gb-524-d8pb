@@ -11,6 +11,7 @@ export const observationApi = {
   get: (id: number) => apiClient.get<BearingObservation>(`/observations/${id}`),
   create: (input: ObservationInput) => apiClient.post<BearingObservation>('/observations', input),
   exclude: (id: number, reason: string) => apiClient.post<BearingObservation>(`/observations/${id}/exclude`, { reason }),
+  reschedule: (id: number, observedAt: string) => apiClient.post<BearingObservation>(`/observations/${id}/reschedule`, { observed_at: observedAt }),
   validateCase: (caseId: number) => apiClient.get<BatchValidation>(`/cases/${caseId}/validate-observations`)
 }
 

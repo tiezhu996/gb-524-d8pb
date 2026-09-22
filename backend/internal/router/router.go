@@ -51,6 +51,7 @@ func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, 
 	protected.GET("/observations/:id", handlers.Observation.Get)
 	protected.POST("/observations", middleware.RBAC(constants.RoleObserver, constants.RoleAnalyst, constants.RoleAdmin), handlers.Observation.Create)
 	protected.POST("/observations/:id/exclude", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Observation.Exclude)
+	protected.POST("/observations/:id/reschedule", middleware.RBAC(constants.RoleObserver, constants.RoleAnalyst, constants.RoleAdmin), handlers.Observation.Reschedule)
 	protected.GET("/cases/:id/validate-observations", handlers.Observation.ValidateCase)
 
 	protected.GET("/cases", handlers.Case.List)
@@ -60,6 +61,7 @@ func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, 
 
 	protected.GET("/localizations", handlers.Estimate.List)
 	protected.GET("/localizations/:id", handlers.Estimate.Get)
+	protected.GET("/cases/:id/batches", handlers.Estimate.Batches)
 	protected.POST("/localizations/run", localizationLimiter.Middleware("localization"), middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Estimate.Run)
 
 	protected.GET("/audits", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Support.ListAudits)

@@ -24,3 +24,29 @@ export function formatDecimal(value: number, digits = 2): string {
   }).format(value)
 }
 
+// 定位批次时间一致性门禁原因码的中文说明。
+export function gateReasonLabel(code: string): string {
+  switch (code) {
+    case 'OBSERVATION_COUNT_BELOW_3':
+      return '批次内有效观测不足 3 条'
+    case 'STATION_COUNT_BELOW_2':
+      return '观测来自少于 2 个不同测向站'
+    default:
+      return code
+  }
+}
+
+// 观测被排除于有效采集证据之外的原因码中文说明。
+export function observationReasonLabel(code: string): string {
+  switch (code) {
+    case 'OBSERVATION_QUALITY_EXCLUDED':
+      return '观测已被人工排除'
+    case 'STATION_NOT_ACTIVE':
+      return '测向站未处于启用状态'
+    case 'FREQUENCY_OUT_OF_BAND':
+      return '观测频率超出案例中心频率带宽'
+    default:
+      return code
+  }
+}
+
