@@ -29,6 +29,19 @@ func (h *EstimateHandler) List(c *gin.Context) {
 	api.Success(c, http.StatusOK, estimates)
 }
 
+func (h *EstimateHandler) BatchPlan(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	plan, err := h.service.BatchPlan(c.Request.Context(), id)
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusOK, plan)
+}
+
 func (h *EstimateHandler) Get(c *gin.Context) {
 	id, ok := parseID(c, "id")
 	if !ok {

@@ -7,12 +7,11 @@ export function useLocalizationRun() {
   const busy = useLocalizationStore((state) => state.busy)
   const [lastResult, setLastResult] = useState<LocalizationRunResult | null>(null)
 
-  const execute = useCallback(async (caseId: number, allowOutlier = true) => {
-    const result = await run(caseId, allowOutlier)
+  const execute = useCallback(async (caseId: number, allowOutlier = true, batchIndex?: number) => {
+    const result = await run(caseId, allowOutlier, batchIndex)
     setLastResult(result)
     return result
   }, [run])
 
   return { execute, busy, lastResult }
 }
-

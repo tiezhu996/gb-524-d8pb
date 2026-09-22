@@ -1,12 +1,13 @@
 import { apiClient } from './client'
-import type { LocalizationEstimate, LocalizationRunResult } from '../types/localization'
+import type { LocalizationBatchPlan, LocalizationEstimate, LocalizationRunResult } from '../types/localization'
 
 export const localizationApi = {
   list: (caseId?: number) => apiClient.get<LocalizationEstimate[]>(`/localizations${caseId ? `?case_id=${caseId}` : ''}`),
   get: (id: number) => apiClient.get<LocalizationEstimate>(`/localizations/${id}`),
-  run: (caseId: number, allowOutlier: boolean) => apiClient.post<LocalizationRunResult>('/localizations/run', {
+  batches: (caseId: number) => apiClient.get<LocalizationBatchPlan>(`/cases/${caseId}/localization-batches`),
+  run: (caseId: number, allowOutlier: boolean, batchIndex?: number) => apiClient.post<LocalizationRunResult>('/localizations/run', {
     case_id: caseId,
+    batch_index: batchIndex ?? 0,
     allow_outlier: allowOutlier
   })
 }
-

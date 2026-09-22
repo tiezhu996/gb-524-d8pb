@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 )
 
 const (
@@ -23,13 +24,15 @@ func (e *DegenerateError) Error() string {
 }
 
 type Input struct {
-	ObservationID uint    `json:"observation_id"`
-	StationCode   string  `json:"station_code"`
-	Latitude      float64 `json:"latitude"`
-	Longitude     float64 `json:"longitude"`
-	BearingDeg    float64 `json:"bearing_deg"`
-	AccuracyDeg   float64 `json:"accuracy_deg"`
-	QualityWeight float64 `json:"quality_weight"`
+	ObservationID uint      `json:"observation_id"`
+	StationID     uint      `json:"station_id"`
+	StationCode   string    `json:"station_code"`
+	Latitude      float64   `json:"latitude"`
+	Longitude     float64   `json:"longitude"`
+	BearingDeg    float64   `json:"bearing_deg"`
+	AccuracyDeg   float64   `json:"accuracy_deg"`
+	QualityWeight float64   `json:"quality_weight"`
+	ObservedAt    time.Time `json:"observed_at"`
 }
 
 type Point struct {

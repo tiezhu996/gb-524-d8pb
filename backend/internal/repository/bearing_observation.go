@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -128,6 +129,42 @@ func (r *ObservationRepository) Exclude(ctx context.Context, id uint, reason str
 		audit := NewAudit(actor, "bearing_observation.excluded", "bearing_observation", id, before, updated)
 		if err := tx.Create(&audit).Error; err != nil {
 			return fmt.Errorf("audit observation exclusion: %w", err)
+		}
+		return nil
+	})
+	return updated, err
+}
+
+func (r *ObservationRepository) Reschedule(ctx context.Context, id uint, observedAt time.Time, actor Actor) (model.BearingObservation, error) {
+	var updated model.BearingObservation
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var before model.BearingObservation
+		if err := tx.First(&before, id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return api.NewError(404, "OBSERVATION_NOT_FOUND", "观测记录不存在")
+			}
+			return fmt.Errorf("load observation for reschedule: %w", err)
+		}
+		var caseRecord model.InterferenceCase
+		if err := tx.First(&caseRecord, before.CaseID).Error; err != nil {
+			return fmt.Errorf("load observation case: %w", err)
+		}
+		if caseRecord.CaseStatus == constants.CaseClosed {
+			return api.NewError(409, "CASE_READ_ONLY", "案例已关闭，观测只读")
+		}
+		result := tx.Model(&model.BearingObservation{}).Where("id = ?", id).Update("observed_at", observedAt.UTC())
+		if result.Error != nil {
+			return fmt.Errorf("reschedule observation: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return api.ErrConflict
+		}
+		if err := tx.Preload("Station").First(&updated, id).Error; err != nil {
+			return fmt.Errorf("reload rescheduled observation: %w", err)
+		}
+		audit := NewAudit(actor, "bearing_observation.rescheduled", "bearing_observation", id, before, updated)
+		if err := tx.Create(&audit).Error; err != nil {
+			return fmt.Errorf("audit observation reschedule: %w", err)
 		}
 		return nil
 	})

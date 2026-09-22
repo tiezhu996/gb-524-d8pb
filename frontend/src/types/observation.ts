@@ -44,3 +44,7 @@ export interface BatchValidation {
   items: ObservationValidation[]
 }
 
+export interface RescheduleObservationInput {
+  observed_at: string
+}
+

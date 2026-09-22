@@ -22,6 +22,10 @@ interface BearingPlotProps {
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, AriaComponent, CanvasRenderer])
 
 export function BearingPlot({ stations, observations, estimate, height = 440 }: BearingPlotProps) {
+  const usedObservationIds = new Set(estimate?.used_observation_ids_json ?? [])
+  const plottedObservations = estimate && usedObservationIds.size > 0
+    ? observations.filter((observation) => usedObservationIds.has(observation.id) && observation.station)
+    : observations.filter((observation) => observation.quality !== 'excluded' && observation.station)
   const option = useMemo<EChartsCoreOption>(() => {
     const sourcePoints = stations.length > 0
       ? stations
@@ -31,7 +35,7 @@ export function BearingPlot({ stations, observations, estimate, height = 440 }: 
     const scale = Math.max(3000, ...localStations.map((station) => Math.hypot(station.x, station.y) * 1.8))
     const series: Array<LineSeriesOption | ScatterSeriesOption> = []
 
-    observations.filter((item) => item.quality !== 'excluded' && item.station).forEach((observation) => {
+    plottedObservations.filter((item) => item.quality !== 'excluded' && item.station).forEach((observation) => {
       const station = toLocal(frame, observation.station!.latitude, observation.station!.longitude)
       const vector = bearingVector(observation.corrected_bearing_deg, scale)
       series.push({
@@ -108,7 +112,7 @@ export function BearingPlot({ stations, observations, estimate, height = 440 }: 
             <Typography component="span"><strong>条件数</strong> {formatDecimal(estimate.condition_number)}</Typography>
           </>
         ) : (
-          <Typography component="span">当前显示 {stations.length} 个测向站与 {observations.filter((item) => item.quality !== 'excluded').length} 条有效方位线。</Typography>
+          <Typography component="span">当前显示 {stations.length} 个测向站与 {plottedObservations.filter((item) => item.quality !== 'excluded').length} 条有效方位线。</Typography>
         )}
       </Box>
     </Box>

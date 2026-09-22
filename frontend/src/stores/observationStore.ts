@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { observationApi } from '../api/observations'
-import type { BearingObservation, BatchValidation, ObservationInput } from '../types/observation'
+import type { BearingObservation, BatchValidation, ObservationInput, RescheduleObservationInput } from '../types/observation'
 
 interface ObservationState {
   observations: BearingObservation[]
@@ -9,6 +9,7 @@ interface ObservationState {
   load: (caseId?: number, stationId?: number) => Promise<void>
   createObservation: (input: ObservationInput) => Promise<BearingObservation>
   excludeObservation: (id: number, reason: string) => Promise<void>
+  rescheduleObservation: (id: number, input: RescheduleObservationInput) => Promise<BearingObservation>
   validateCase: (caseId: number) => Promise<BatchValidation>
 }
 
@@ -34,10 +35,14 @@ export const useObservationStore = create<ObservationState>((set, get) => ({
     const response = await observationApi.exclude(id, reason)
     set({ observations: get().observations.map((item) => item.id === id ? { ...item, ...response.data } : item) })
   },
+  rescheduleObservation: async (id, input) => {
+    const response = await observationApi.reschedule(id, input)
+    set({ observations: get().observations.map((item) => item.id === id ? { ...item, ...response.data } : item) })
+    return response.data
+  },
   validateCase: async (caseId) => {
     const response = await observationApi.validateCase(caseId)
     set({ validation: response.data })
     return response.data
   }
 }))
-

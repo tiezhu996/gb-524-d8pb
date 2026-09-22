@@ -1,30 +1,43 @@
 import { create } from 'zustand'
 import { localizationApi } from '../api/localizations'
-import type { LocalizationEstimate, LocalizationRunResult } from '../types/localization'
+import type { LocalizationBatchPlan, LocalizationEstimate, LocalizationRunResult } from '../types/localization'
 
 interface LocalizationState {
   estimates: LocalizationEstimate[]
   selected: LocalizationEstimate | null
+  batchPlan: LocalizationBatchPlan | null
   busy: boolean
   load: (caseId?: number) => Promise<void>
-  run: (caseId: number, allowOutlier: boolean) => Promise<LocalizationRunResult>
+  loadBatches: (caseId: number) => Promise<LocalizationBatchPlan>
+  run: (caseId: number, allowOutlier: boolean, batchIndex?: number) => Promise<LocalizationRunResult>
   select: (estimate: LocalizationEstimate | null) => void
 }
 
 export const useLocalizationStore = create<LocalizationState>((set, get) => ({
   estimates: [],
   selected: null,
+  batchPlan: null,
   busy: false,
   load: async (caseId) => {
     const response = await localizationApi.list(caseId)
     set({ estimates: response.data, selected: response.data[0] ?? null })
   },
-  run: async (caseId, allowOutlier) => {
+  loadBatches: async (caseId) => {
+    const response = await localizationApi.batches(caseId)
+    set({ batchPlan: response.data.case_id === caseId ? response.data : null })
+    return response.data
+  },
+  run: async (caseId, allowOutlier, batchIndex) => {
     set({ busy: true })
     try {
-      const response = await localizationApi.run(caseId, allowOutlier)
-      const additions = response.data.candidate ? [response.data.candidate, response.data.primary] : [response.data.primary]
-      set({ estimates: [...additions, ...get().estimates], selected: response.data.candidate ?? response.data.primary })
+      const response = await localizationApi.run(caseId, allowOutlier, batchIndex)
+      const existing = get().estimates.some((estimate) => estimate.id === response.data.primary.id)
+      if (!existing) {
+        const additions = response.data.candidate ? [response.data.candidate, response.data.primary] : [response.data.primary]
+        set({ estimates: [...additions, ...get().estimates], selected: response.data.candidate ?? response.data.primary })
+      } else {
+        set({ selected: response.data.candidate ?? response.data.primary })
+      }
       return response.data
     } finally {
       set({ busy: false })
@@ -32,4 +45,3 @@ export const useLocalizationStore = create<LocalizationState>((set, get) => ({
   },
   select: (estimate) => set({ selected: estimate })
 }))
-

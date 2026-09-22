@@ -40,6 +40,9 @@ docker compose down -v --remove-orphans
 - 按案例录入频率、带宽、信号强度和质量，批量校验频率匹配与站点状态，排除操作保留原因和审计。
 - 在本地笛卡尔坐标图中显示测向站、方位射线、估计点、不确定区域、逐站残差和离群证据。
 - 二站几何交汇和三站以上加权最小二乘使用同一确定性求解器；近平行或近共线几何明确拒绝，不返回伪精确点。
+- 定位前执行三十分钟时间一致性门禁：以案例最早有效观测为起点分批，只有同一批次内至少三条且覆盖至少两个启用测向站的观测可参与本次估计。
+- 排除、补录或改期观测后重新分批；定位页展示各批次窗口、不可运行原因、可用观测和保留在案例中但不参与本次估计的证据。
+- 定位结果保存批次元数据、输入与批次证据快照和证据哈希；相同批次证据的重复或并发运行只返回既有结果，不生成第二份估计。
 - 当至少有四条有效观测时，可比较标准化残差并生成一次离群候选重算；原估计和候选结果都不可覆盖。
 - 案例执行 `draft -> collecting -> analyzing -> pending_review -> confirmed -> closed`；退回从 `pending_review` 回到 `analyzing`，关闭后只读。
 - JWT、RBAC、乐观锁、事务、内存令牌桶限流、request ID、结构化日志和不可变审计贯穿业务链。
@@ -97,9 +100,11 @@ docker compose down -v --remove-orphans
 | `GET/POST` | `/api/v1/stations` | 测向站列表与登记 |
 | `GET/PUT` | `/api/v1/stations/:id` | 站点详情与校准更新 |
 | `GET` | `/api/v1/stations/:id/coverage` | 站点观测覆盖 |
-| `GET/POST` | `/api/v1/observations` | 观测列表与录入 |
+| `GET` | `/api/v1/observations` | 观测列表与录入 |
+| `PUT` | `/api/v1/observations/:id/reschedule` | 改期观测并触发批次重算 |
 | `POST` | `/api/v1/observations/:id/exclude` | 保存原因并排除观测 |
 | `GET` | `/api/v1/cases/:id/validate-observations` | 批量校验案例观测 |
+| `GET` | `/api/v1/cases/:id/localization-batches` | 查询三十分钟定位批次与门禁原因 |
 | `GET/POST` | `/api/v1/cases` | 案例列表与草稿创建 |
 | `POST` | `/api/v1/cases/:id/transition` | 带 version 的状态迁移 |
 | `GET` | `/api/v1/localizations` | 查询不可覆盖的定位历史 |
@@ -126,12 +131,15 @@ docker compose down -v --remove-orphans
 
 ## 定位算法与假设
 
-1. 以参与观测站的平均经纬度为原点，在小范围内使用地球平均半径 `R=6371008.8m` 将 WGS84 差值转换为东、北方向局部坐标。
-2. 方位角以正北为 0 度、顺时针增加。每条射线使用法向量构造 `A = Σ(w n nᵀ)`、`b = Σ(w n nᵀ s)`，求解 `A p = b`。
-3. 权重为 `quality_weight / accuracy_deg²`；质量权重依次为 good `1.0`、fair `0.55`、poor `0.2`，excluded 不参与计算。
-4. 通过 2×2 对称矩阵特征值计算条件数。最小特征值过小或条件数超过 `GEOMETRY_CONDITION_LIMIT` 时返回 `GEOMETRY_DEGENERATE`，不形成定位点。
-5. 残差是观测方位与“测站指向估计点”的最小有符号角差；不确定半径综合站点距离、精度、加权 RMS 残差和几何因子，只表达模型不确定性。
-6. 离群候选仅在原始有效观测不少于 4 条、剔除后仍不少于 3 条、最大标准化残差超过 2.5 且候选残差至少改善 20% 时生成。原估计仍永久保存。
+1. 案例观测先按时间排序，以最早当前有效观测为起点生成左闭右开的 30 分钟窗口；有效观测指未排除、来自启用测向站且频率落在案例有效带宽内的观测。
+2. 每个窗口独立成为定位批次。只有同一批次内存在至少三条有效观测、且这些观测来自至少两个不同测向站时才允许运行；其他批次和跨批次观测继续保留在案例证据中。
+3. 以参与观测站的平均经纬度为原点，在小范围内使用地球平均半径 `R=6371008.8m` 将 WGS84 差值转换为东、北方向局部坐标。
+4. 方位角以正北为 0 度、顺时针增加。每条射线使用法向量构造 `A = Σ(w n nᵀ)`、`b = Σ(w n nᵀ s)`，求解 `A p = b`。
+5. 权重为 `quality_weight / accuracy_deg²`；质量权重依次为 good `1.0`、fair `0.55`、poor `0.2`，excluded 不参与计算。
+6. 通过 2×2 对称矩阵特征值计算条件数。最小特征值过小或条件数超过 `GEOMETRY_CONDITION_LIMIT` 时返回 `GEOMETRY_DEGENERATE`，不形成定位点。
+7. 残差是观测方位与“测站指向估计点”的最小有符号角差；不确定半径综合站点距离、精度、加权 RMS 残差和几何因子，只表达模型不确定性。
+8. 离群候选仅在批次有效观测不少于 4 条、剔除后仍不少于 3 条、最大标准化残差超过 2.5 且候选残差至少改善 20% 时生成。原估计仍永久保存。
+9. 每次保存记录批次窗口、参与输入、批次观测、算法版本、几何阈值和证据哈希；相同证据哈希的重复或并发运行复用既有主估计和候选，不新增结果或审计记录。
 
 以上是适用于小区域的软件演示模型，不包含电波传播、地形、多径、同步误差或法规判定，不能替代经校准的专业测向流程。
 
@@ -186,7 +194,9 @@ npm --prefix frontend run build
 - Compose 项目名为空：确认根目录 `.env` 存在且 `COMPOSE_PROJECT_NAME` 为英文；Compose 文件也有固定 `name` 兜底。
 - 后端未 healthy：执行 `docker compose logs backend`，检查 JWT 长度、数据库密码和 PostgreSQL 健康状态。
 - 定位返回 `FREQUENCY_MISMATCH`：确认每条观测与案例中心频率的偏差不超过该观测带宽的一半。
-- 定位返回 `GEOMETRY_DEGENERATE`：增加不同方位几何的测向站，不能通过放宽显示精度规避退化证据。
+- 定位返回 `GEOMETRY_DEGENERATE`：增加同一批次内不同方位几何的测向站，不能通过放宽显示精度规避退化证据。
+- 定位返回 `NO_ELIGIBLE_LOCALIZATION_BATCH`：检查批次是否有至少三条有效观测并覆盖两个不同测向站；可改期观测重新分批，跨批次观测不会被删除。
+- 定位返回 `LOCALIZATION_BATCH_REQUIRED`：案例内存在多个满足条件的 30 分钟批次，需要明确选择要运行的批次。
 - 状态迁移返回 `CASE_VERSION_CONFLICT`：其他请求已更新案例，刷新列表后使用新 version 重试。
 - 登录后出现 401：清除当前标签页 `sessionStorage` 后重新登录；令牌不会持久化到其他浏览器会话。
 

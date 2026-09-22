@@ -52,12 +52,9 @@ func (s *ObservationService) Create(ctx context.Context, request dto.CreateObser
 	if err := validateFrequency(caseRecord.FrequencyCenterHz, request.FrequencyHz, request.BandwidthHz); err != nil {
 		return model.BearingObservation{}, err
 	}
-	observedAt := time.Now().UTC()
-	if request.ObservedAt != nil {
-		observedAt = request.ObservedAt.UTC()
-	}
-	if observedAt.After(time.Now().UTC().Add(5 * time.Minute)) {
-		return model.BearingObservation{}, api.NewError(422, "INVALID_OBSERVATION_TIME", "观测时间不能晚于当前时间")
+	observedAt := normalizeObservedAt(request.ObservedAt)
+	if err := validateObservedAt(observedAt); err != nil {
+		return model.BearingObservation{}, err
 	}
 	corrected := normalizeBearing(request.BearingDeg + station.AntennaBiasDeg)
 	observation := model.BearingObservation{
@@ -79,6 +76,17 @@ func (s *ObservationService) Exclude(ctx context.Context, id uint, request dto.E
 		return model.BearingObservation{}, api.ErrForbidden
 	}
 	return s.repo.Exclude(ctx, id, strings.TrimSpace(request.Reason), actor)
+}
+
+func (s *ObservationService) Reschedule(ctx context.Context, id uint, request dto.RescheduleObservationRequest, actor repository.Actor) (model.BearingObservation, error) {
+	if !constants.CanObserve(actor.Role) {
+		return model.BearingObservation{}, api.ErrForbidden
+	}
+	observedAt := request.ObservedAt.UTC()
+	if err := validateObservedAt(observedAt); err != nil {
+		return model.BearingObservation{}, err
+	}
+	return s.repo.Reschedule(ctx, id, observedAt, actor)
 }
 
 func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto.BatchValidationResponse, error) {
@@ -114,6 +122,20 @@ func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto
 		response.Items = append(response.Items, item)
 	}
 	return response, nil
+}
+
+func normalizeObservedAt(value *time.Time) time.Time {
+	if value == nil {
+		return time.Now().UTC()
+	}
+	return value.UTC()
+}
+
+func validateObservedAt(observedAt time.Time) error {
+	if observedAt.After(time.Now().UTC().Add(5 * time.Minute)) {
+		return api.NewError(422, "INVALID_OBSERVATION_TIME", "观测时间不能晚于当前时间")
+	}
+	return nil
 }
 
 func validateFrequency(center, observed, bandwidth float64) error {

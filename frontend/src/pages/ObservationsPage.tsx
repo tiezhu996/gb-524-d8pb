@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import AddRounded from '@mui/icons-material/AddRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import FactCheckRounded from '@mui/icons-material/FactCheckRounded'
+import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material'
 import { PageHeader } from '../components/common/PageHeader'
 import { QualityBadge } from '../components/common/QualityBadge'
@@ -22,15 +23,18 @@ export function ObservationsPage() {
   const loadObservations = useObservationStore((state) => state.load)
   const createObservation = useObservationStore((state) => state.createObservation)
   const excludeObservation = useObservationStore((state) => state.excludeObservation)
+  const rescheduleObservation = useObservationStore((state) => state.rescheduleObservation)
   const validateCase = useObservationStore((state) => state.validateCase)
   const validation = useObservationStore((state) => state.validation)
   const [caseId, setCaseId] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
   const [excludeTarget, setExcludeTarget] = useState<BearingObservation | null>(null)
   const [excludeReason, setExcludeReason] = useState('')
+  const [rescheduleTarget, setRescheduleTarget] = useState<BearingObservation | null>(null)
+  const [rescheduleTime, setRescheduleTime] = useState('')
   const [saving, setSaving] = useState(false)
   const selectedCase = cases.find((item) => item.id === caseId)
-  const [form, setForm] = useState<ObservationInput>({ station_id: 0, case_id: 0, bearing_deg: 0, signal_dbm: -70, frequency_hz: 433_920_000, bandwidth_hz: 12_500, quality: 'good' })
+  const [form, setForm] = useState<ObservationInput>({ station_id: 0, case_id: 0, bearing_deg: 0, signal_dbm: -70, frequency_hz: 433_920_000, bandwidth_hz: 12_500, observed_at: toDatetimeLocalValue(new Date().toISOString()), quality: 'good' })
 
   useEffect(() => {
     void Promise.all([loadCases(), loadStations()])
@@ -57,7 +61,7 @@ export function ObservationsPage() {
     event.preventDefault()
     setSaving(true)
     try {
-      await createObservation(form)
+      await createObservation({ ...form, observed_at: localDateTimeToISO(form.observed_at ?? '') })
       setCreateOpen(false)
     } finally {
       setSaving(false)
@@ -71,6 +75,22 @@ export function ObservationsPage() {
       await excludeObservation(excludeTarget.id, excludeReason)
       setExcludeTarget(null)
       setExcludeReason('')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const openReschedule = (item: BearingObservation) => {
+    setRescheduleTarget(item)
+    setRescheduleTime(toDatetimeLocalValue(item.observed_at))
+  }
+
+  const reschedule = async () => {
+    if (!rescheduleTarget || !rescheduleTime) return
+    setSaving(true)
+    try {
+      await rescheduleObservation(rescheduleTarget.id, { observed_at: new Date(rescheduleTime).toISOString() })
+      setRescheduleTarget(null)
     } finally {
       setSaving(false)
     }
@@ -110,7 +130,7 @@ export function ObservationsPage() {
                   <TableCell className="numeric">{formatFrequency(item.frequency_hz)}<br /><span className="secondary-text">BW {formatFrequency(item.bandwidth_hz)}</span></TableCell>
                   <TableCell className="numeric">{formatDecimal(item.signal_dbm, 1)} dBm</TableCell>
                   <TableCell><QualityBadge quality={item.quality} />{item.excluded_reason && <Typography variant="caption" display="block">{item.excluded_reason}</Typography>}</TableCell>
-                  <TableCell align="right">{hasRole('analyst', 'admin') && item.quality !== 'excluded' && <Button size="small" color="warning" startIcon={<BlockRounded />} onClick={() => setExcludeTarget(item)}>排除</Button>}</TableCell>
+                  <TableCell align="right"><Stack direction="row" spacing={1} justifyContent="flex-end">{hasRole('observer', 'analyst', 'admin') && <Button size="small" startIcon={<ScheduleRounded />} onClick={() => openReschedule(item)}>改期</Button>}{hasRole('analyst', 'admin') && item.quality !== 'excluded' && <Button size="small" color="warning" startIcon={<BlockRounded />} onClick={() => setExcludeTarget(item)}>排除</Button>}</Stack></TableCell>
                 </TableRow>
               ))}
               {observations.length === 0 && <TableRow><TableCell colSpan={6}>当前案例没有观测。至少录入来自两个启用站点的方位才能运行定位。</TableCell></TableRow>}
@@ -137,6 +157,7 @@ export function ObservationsPage() {
               <TextField label="带宽（Hz）" type="number" value={form.bandwidth_hz} onChange={(event) => setForm({ ...form, bandwidth_hz: Number(event.target.value) })} required fullWidth />
             </Stack>
             <TextField label="信号强度（dBm）" type="number" inputProps={{ min: -200, max: 50, step: 0.1 }} value={form.signal_dbm} onChange={(event) => setForm({ ...form, signal_dbm: Number(event.target.value) })} required />
+            <TextField label="观测时间（补录可选择过去时间）" type="datetime-local" InputLabelProps={{ shrink: true }} value={form.observed_at ?? ''} onChange={(event) => setForm({ ...form, observed_at: new Date(event.target.value).toISOString() })} required />
           </Stack></DialogContent>
           <DialogActions><Button onClick={() => setCreateOpen(false)} disabled={saving}>继续查看</Button><Button type="submit" variant="contained" disabled={saving}>保存观测</Button></DialogActions>
         </form>
@@ -147,7 +168,23 @@ export function ObservationsPage() {
         <DialogContent><TextField sx={{ mt: 1 }} fullWidth multiline minRows={3} label="排除证据" value={excludeReason} onChange={(event) => setExcludeReason(event.target.value)} helperText="该动作保留原始值并写入审计，至少填写 6 个字符。" /></DialogContent>
         <DialogActions><Button onClick={() => setExcludeTarget(null)} disabled={saving}>保留观测</Button><Button color="warning" variant="contained" disabled={saving || excludeReason.trim().length < 6} onClick={() => void exclude()}>记录并排除</Button></DialogActions>
       </Dialog>
+
+      <Dialog open={Boolean(rescheduleTarget)} onClose={saving ? undefined : () => setRescheduleTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>改期观测 #{rescheduleTarget?.id}</DialogTitle>
+        <DialogContent><TextField sx={{ mt: 1 }} fullWidth type="datetime-local" label="观测时间" InputLabelProps={{ shrink: true }} value={rescheduleTime} onChange={(event) => setRescheduleTime(event.target.value)} helperText="保存后按新的观测时间重新计算三十分钟采集批次。" /></DialogContent>
+        <DialogActions><Button onClick={() => setRescheduleTarget(null)} disabled={saving}>取消</Button><Button variant="contained" disabled={saving || !rescheduleTime} onClick={() => void reschedule()}>保存并重新分批</Button></DialogActions>
+      </Dialog>
     </>
   )
+}
+
+function toDatetimeLocalValue(value: string): string {
+  const date = new Date(value)
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+function localDateTimeToISO(value: string): string {
+  return new Date(value).toISOString()
 }
 
